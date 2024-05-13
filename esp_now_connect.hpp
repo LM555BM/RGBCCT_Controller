@@ -1,0 +1,111 @@
+#pragma once
+
+#include <esp_now.h>
+#include <vector>
+
+enum pairingStatus_t{PAIR_REQUEST, PAIR_REQUESTED, PAIR_PAIRED};
+enum messageType_t{LIGHTING_DATA, SAVE, PAIRING};
+
+class ESP_NOW_BASE
+{
+	public:
+		//Typedefs
+		enum stateSelf_t{
+		  MASTER,
+		  SLAVE,
+		  UNKNOWN
+		};
+
+		struct pairing_t{
+		  messageType_t msgType;
+		  stateSelf_t senderType;
+		};
+
+    template <typename T>
+    struct sendingData_t{
+      messageType_t msgType;
+      T data;
+    };
+
+    //Variables
+    stateSelf_t stateSelf;
+
+		//Methodes
+    ESP_NOW_BASE();
+    ~ESP_NOW_BASE();
+		virtual uint8_t autoPairing() = 0;
+
+    template <typename T>
+    esp_err_t sendLightingData(std::vector<T>* data,  messageType_t messageType)
+    {
+      esp_err_t errorMsg;
+
+      if(data != nullptr)
+      {
+        sendingData_t<T> sendingData;
+        sendingData.msgType = messageType;
+
+        //Go through all Paired Slaves and new Data at the same time, until one is at the end
+        for(int iterator = 0;  iterator < std::min(data->size(),connections.size()); iterator++)
+        {
+          sendingData.data = (*data)[iterator];
+          errorMsg = esp_now_send(connections[iterator].peer_addr, (uint8_t *) &sendingData, sizeof(sendingData));
+        }
+      }
+      else
+      {
+        sendingData_t<char> sendingData = {messageType,'\0'};    
+
+        //Send all Paired Slaves the message Type
+        for(const esp_now_peer_info_t& reciver : connections)
+        {
+          errorMsg = esp_now_send(reciver.peer_addr, (uint8_t *) &sendingData, sizeof(sendingData));
+        }
+      }
+      return errorMsg;
+    }
+	
+	protected:
+		//Variables
+		std::vector<esp_now_peer_info_t> connections;
+		uint8_t pairingStatus = PAIR_REQUEST;
+		
+		const uint8_t broadcastAddressX[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+		
+		//Methodes
+		bool addPeer(const uint8_t *peer_addr); 
+		void printMAC(const uint8_t * mac_addr);
+		
+		virtual void  OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) = 0;
+		virtual void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len)	= 0;
+};
+
+
+
+class ESP_NOW_MASTER : public ESP_NOW_BASE
+{
+	public:
+    ESP_NOW_MASTER();
+    uint8_t autoPairing() override;
+
+  protected:
+    static ESP_NOW_MASTER* ptr;
+
+    void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) override;
+	  void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) override;
+};
+
+
+
+class ESP_NOW_SLAVE : public ESP_NOW_BASE
+{
+  public:
+    ESP_NOW_SLAVE();
+    uint8_t autoPairing() override;  
+
+  protected:
+    static ESP_NOW_SLAVE* ptr;
+
+    void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) override;
+	  void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) override;
+};
