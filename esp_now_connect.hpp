@@ -1,5 +1,6 @@
 #pragma once
 
+#include "led.hpp"
 #include <esp_now.h>
 #include <vector>
 
@@ -31,9 +32,10 @@ class ESP_NOW_BASE
     stateSelf_t stateSelf;
 
 		//Methodes
-    ESP_NOW_BASE();
+    ESP_NOW_BASE(uint8_t* loopState, std::vector<LED>* ledVector);
     ~ESP_NOW_BASE();
 		virtual uint8_t autoPairing() = 0;
+
 
     template <typename T>
     esp_err_t sendLightingData(std::vector<T>* data,  messageType_t messageType)
@@ -67,7 +69,11 @@ class ESP_NOW_BASE
 	
 	protected:
 		//Variables
-		std::vector<esp_now_peer_info_t> connections;
+    std::vector<LED>* lights;
+    uint8_t* main_state;
+
+
+		std::vector<esp_now_peer_info_t> connections;   
 		uint8_t pairingStatus = PAIR_REQUEST;
 		
 		const uint8_t broadcastAddressX[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -85,7 +91,7 @@ class ESP_NOW_BASE
 class ESP_NOW_MASTER : public ESP_NOW_BASE
 {
 	public:
-    ESP_NOW_MASTER();
+    ESP_NOW_MASTER(uint8_t* loopState, std::vector<LED>* ledVector);
     uint8_t autoPairing() override;
 
   protected:
@@ -100,7 +106,7 @@ class ESP_NOW_MASTER : public ESP_NOW_BASE
 class ESP_NOW_SLAVE : public ESP_NOW_BASE
 {
   public:
-    ESP_NOW_SLAVE();
+    ESP_NOW_SLAVE(uint8_t* loopState, std::vector<LED>* ledVector);
     uint8_t autoPairing() override;  
 
   protected:

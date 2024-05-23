@@ -3,32 +3,27 @@
 #include <stdint.h>
 #include <Preferences.h>
 
+enum color_t{RED, GREEN, BLUE, TEMPRATURE, BRIGHTNESS};
+
 class LED
 {
   private:
-    uint8_t red;
-    uint8_t green;
-    uint8_t blue;
-    uint8_t whiteTemprature;
-    uint8_t brightness;
+  /*
+  color = [red, green, blue, Temprature, Brightness]
+  */
+    std::array<uint8_t, 5> color;
+  
   public:
-    LED();
-    LED(uint8_t redPart, uint8_t greenPart, uint8_t bluePart, uint8_t temprature, uint8_t intensity);
+    LED(uint8_t redPart = 0xFF, uint8_t greenPart = 0x64, uint8_t bluePart = 0x00, uint8_t temprature = 0x00, uint8_t intensity = 0x00);
 
     /*
     RGB = [red,green,blue]
     */
-    bool setColor(uint8_t *RGB);
-    bool setColor(uint8_t redPart, uint8_t greenPart, uint8_t bluePart);
+    void setColor(std::array<uint8_t, 5>* colorData);
+    bool setRGB(uint8_t *RGB);
+    bool setRGB(uint8_t redPart, uint8_t greenPart, uint8_t bluePart);
     bool setTemprature(uint8_t temprature);
     bool setBrightness(uint8_t intensity);
 
-    uint8_t getRed();
-    uint8_t getBlue();
-    uint8_t getGreen();
-    uint8_t getTemprature();
-    uint8_t getBrightness();
-
-    void saveState(Preferences * nvm);
-    void loadState(Preferences* nvm);
+    std::array<uint8_t, 5>& getColor();
 };
