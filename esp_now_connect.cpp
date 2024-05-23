@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <hardwareSerial.h>
 
-ESP_NOW_BASE::ESP_NOW_BASE()
+ESP_NOW_BASE::ESP_NOW_BASE(uint8_t* loopState, std::vector<LED>* ledVector) : main_state{loopState},lights{ledVector}
 {
   
 }
@@ -66,7 +66,7 @@ bool ESP_NOW_BASE::addPeer(const uint8_t *peer_addr)
 //Master declaration
 ESP_NOW_MASTER* ESP_NOW_MASTER::ptr = nullptr;
 
-ESP_NOW_MASTER::ESP_NOW_MASTER() : ESP_NOW_BASE()
+ESP_NOW_MASTER::ESP_NOW_MASTER(uint8_t* loopState, std::vector<LED>* ledVector) : ESP_NOW_BASE(loopState,ledVector)
 {
   stateSelf = MASTER;
 
@@ -153,7 +153,7 @@ uint8_t ESP_NOW_MASTER::autoPairing()
 //Slave declaration
 ESP_NOW_SLAVE* ESP_NOW_SLAVE::ptr = nullptr;
 
-ESP_NOW_SLAVE::ESP_NOW_SLAVE() : ESP_NOW_BASE()
+ESP_NOW_SLAVE::ESP_NOW_SLAVE(uint8_t* loopState, std::vector<LED>* ledVector) : ESP_NOW_BASE(loopState,ledVector)
 {
   stateSelf = SLAVE;
 

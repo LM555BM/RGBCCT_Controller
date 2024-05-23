@@ -5,25 +5,40 @@
 #include "led.hpp"
 
 //Enums
-typedef enum
+enum serial_state_t
 {
-  Start = 0xC9,
-  Datenart,
-  Framesize,
-  Datenpaket = 0xDA,
-  Kommandopaket = 0xC0,
-  Helligkeitsbefehl = 0x0A,
-  Tempraturbefehl = 0xFF,
-  Speichern = 0x01,
-  Ende = 0x36
-}state_t;
+  START = 0xC9,
+  DATENART,
+  FRAMESIZE,
+  DATENPAKET = 0xDA,
+  KOMMANDOPAKET = 0xC0,
+  HELLIGKEITSBEFEHL = 0x0A,
+  TEMPRATURBEFEHL = 0xFF,
+  SPEICHERN = 0x01,
+  ENDE = 0x36
+};
+
+enum loop_state_t
+{
+  IDLE,
+  SAVE_LED,
+  UPDATE_LED,
+  POWER_SAVING
+};
 
 //IO-Pinout Config
-const uint8_t RedLED = 33;
-const uint8_t GreenLED = 32;
-const uint8_t BlueLED = 27;
-const uint8_t WarmLED = 26;
-const uint8_t ColdLED = 25;
+const uint8_t RedPin = 19;
+const uint8_t GreenPin = 18;
+const uint8_t BluePin = 5;
+const uint8_t WarmPin = 2;
+const uint8_t ColdPin = 4;
+
+const uint8_t RedLED = 0;
+const uint8_t GreenLED = 1;
+const uint8_t BlueLED = 2;
+const uint8_t WarmLED = 3;
+const uint8_t ColdLED = 4;
+
 const uint8_t debugLED = 2;
 
 const touch_pad_t firstPad = TOUCH_PAD_NUM8;
@@ -34,9 +49,9 @@ bool longPressDetected = false;
 bool shortPressDetected = false;
 uint16_t touchValue = 0;
 
-LED myLight[10];
-bool updateAvailable = false;
-static uint16_t state = Start;
+std::vector<LED> myLight;
+static uint16_t serialState = START;
+loop_state_t loopState = IDLE;
 
 Preferences eeprom;
 
@@ -88,6 +103,8 @@ void longPress_isr(void)
 
 void serialEvent()
 {
+  Serial.write(serialState & 0x00FF);
+
   static uint16_t length;
   static uint8_t artworkCounter = 0;
   static uint8_t neededBytes = 1;
@@ -95,109 +112,126 @@ void serialEvent()
 
   while(Serial.available() >= neededBytes)
   {
-    switch(state & 0x00FF)
+    switch(serialState & 0x00FF)
     {
-      case Start:
-        if(Serial.read() == Start)
+      case START:
+        if(Serial.read() == START)
         {
-          state = Datenart;
+          serialState = DATENART;
         }
         break;
-      case Datenart:
-        state = Serial.read() << 8 | Framesize;
+      case DATENART:
+        serialState = Serial.read() << 8 | FRAMESIZE;
         neededBytes = 2;
         break;
 
-      case Framesize:
+      case FRAMESIZE:
         Serial.readBytes(buffer,neededBytes);
         length = buffer[0] << 8 | buffer[1];
 
-        state = state >> 8;
-        if(state == Datenpaket)
+        if(length / neededBytes > myLight.size())
+        {
+          myLight.reserve(length / neededBytes);
+        }
+        
+
+        serialState = serialState >> 8;
+        if(serialState == DATENPAKET)
         {
           neededBytes = 3;
         }
-        else if(state & 0xFF00 == Kommandopaket)
+        else if(serialState & 0xFF00 == KOMMANDOPAKET)
         {
           neededBytes = 1;
         }
         break;
 
-      case Datenpaket:
+      case DATENPAKET:
         Serial.readBytes(buffer,3);
-        myLight[artworkCounter++].setColor(buffer);
+        try
+        {
+          myLight.at(artworkCounter++).setRGB(buffer);
+        }
+        catch(std::out_of_range const& exc)
+        {
+          myLight.push_back(LED(buffer[RED],buffer[GREEN],buffer[BLUE]));
+        }
+        
         length = length - 3;
 
         if(length == 0)
         {
           neededBytes = 1;
-          state = Ende;
+          serialState = ENDE;
         }
         break;
 
-      case Kommandopaket:
-        state = Serial.read();
+      case KOMMANDOPAKET:
+        serialState = Serial.read();
         break;
 
-      case Helligkeitsbefehl:
+      case HELLIGKEITSBEFEHL:
+        //There is currently only one Brightness for everybody
         buffer[0] = Serial.read();
-        myLight[artworkCounter++].setBrightness(buffer[0]);
+        for(auto& artwork : myLight)
+        {
+          artwork.setBrightness(buffer[0]);
+        }
+
+        // Use when seprate Brightnesses are available
+        //myLight[artworkCounter++].setBrightness(buffer[0]);
 
         if(--length == 0)
         {
           neededBytes = 1;
-          state = Ende;
+          serialState = ENDE;
         }
         break;
 
-      case Tempraturbefehl:
+      case TEMPRATURBEFEHL:
         buffer[0] = Serial.read();
+        for(auto& artwork : myLight)
+        {
+          artwork.setTemprature(buffer[0]);
+        }
+
+        // Use when seprate Tempratures are available
         myLight[artworkCounter++].setTemprature(buffer[0]);
 
         if(--length == 0)
         {
           neededBytes = 1;
-          state = Ende;
+          serialState = ENDE;
         }
         break;
 
-      case Ende:
-        if(Serial.read() == Ende)
+      case ENDE:
+        if(Serial.read() == ENDE)
         {
           artworkCounter = 0;
           neededBytes = 1;
-          state = Start;
-          updateAvailable = true;
+          serialState = START;
+          loopState = UPDATE_LED;
         }
         break;
     }
   }
 }
 
-//Functions
-void updateLED()
-{
-  ledcWrite(0, myLight[0].getRed());
-  ledcWrite(1, myLight[0].getGreen());
-  ledcWrite(2, myLight[0].getBlue());
-  ledcWrite(3, (myLight[0].getTemprature() * myLight[0].getBrightness()) / 255);
-  ledcWrite(4, ((255 - myLight[0].getTemprature()) * myLight[0].getBrightness()) / 255);
-}
-
 void setup()
 {
   //Setup the Pins which drives the MOSFET to use the LEDC Controller on the ESP32
-  ledcAttachPin(RedLED, 0);
-  ledcAttachPin(GreenLED, 1);
-  ledcAttachPin(BlueLED, 2);
-  ledcAttachPin(WarmLED, 3);
-  ledcAttachPin(ColdLED, 4);
+  ledcAttachPin(RedPin, 0);
+  ledcAttachPin(GreenPin, 1);
+  ledcAttachPin(BluePin, 2);
+  ledcAttachPin(WarmPin, 3);
+  ledcAttachPin(ColdPin, 4);
 
-  ledcSetup(0, 1000, 8);
-  ledcSetup(1, 1000, 8);
-  ledcSetup(2, 1000, 8);
-  ledcSetup(3, 1000, 8);
-  ledcSetup(4, 1000, 8);
+  ledcSetup(RedLED, 1000, 8);
+  ledcSetup(GreenLED, 1000, 8);
+  ledcSetup(BlueLED, 1000, 8);
+  ledcSetup(WarmLED, 1000, 8);
+  ledcSetup(ColdLED, 1000, 8);
 
   //Setup Touchpad with Timer for long Press detection
   hw_timer_t* timer1 = timerBegin(0,24000,true);
@@ -216,21 +250,9 @@ void setup()
   //Restore the State of the LED's if available in the EEPROM, else create default
   eeprom.begin("LEDState",true);
   bool isInit = eeprom.isKey("init");
-
-  if(!isInit)
-  {
-    eeprom.end();
-    eeprom.begin("LEDState",false);
-    myLight[0].saveState(&eeprom);
-    eeprom.putBool("init",true);
-  }
-  else
-  {
-    myLight[0].loadState(&eeprom);
-  }
-
+  myLight.push_back(isInit ? LED(eeprom.getUChar("Red"), eeprom.getUChar("Green"), eeprom.getUChar("Blue"), eeprom.getUChar("Brightness"), eeprom.getUChar("Temprature")) : LED());
   eeprom.end();
-  updateLED();
+  loopState = UPDATE_LED;
 
   //Miscellaneous stuff
   Serial.begin(9600);
@@ -244,21 +266,67 @@ void setup()
 
 void loop()
 {
-    if(updateAvailable)
+  switch(loopState)
   {
-    updateLED();
+    case IDLE:
+      {
+        
+      }
+      break;
+    
+    case POWER_SAVING:
+    {
+      break;
+    }
 
-    updateAvailable = false;
+    case SAVE_LED:
+    {
+      uint8_t error = 1;
+
+      eeprom.begin("LEDState",false);
+
+      std::array<uint8_t, 5>& saveColor = myLight[0].getColor();
+
+      error &= eeprom.putUChar("Red",saveColor[RED]);
+      error &= eeprom.putUChar("Green",saveColor[GREEN]);
+      error &= eeprom.putUChar("Blue",saveColor[BLUE]);
+      error &= eeprom.putUChar("Brightness",saveColor[BRIGHTNESS]);
+      error &= eeprom.putUChar("Temprature",saveColor[TEMPRATURE]);
+
+      eeprom.putBool("init",true);
+      eeprom.end();
+
+      if(error != 0)
+      {
+        Serial.println("An error has occured while saving to NVM");
+      }
+      //Inform others
+
+      loopState = IDLE;
+      break;
+    }
+
+    case UPDATE_LED:
+    {
+      std::array<uint8_t, 5>& newColor = myLight[0].getColor();
+
+      ledcWrite(RedLED, newColor[RED]);
+      ledcWrite(GreenLED, newColor[GREEN]);
+      ledcWrite(BlueLED, newColor[BLUE]);
+      ledcWrite(WarmLED, (newColor[TEMPRATURE] * newColor[BRIGHTNESS]) / 255);
+      ledcWrite(ColdLED, ((255 - newColor[TEMPRATURE] * newColor[BRIGHTNESS]) / 255));
+
+      //Inform others
+
+      loopState = IDLE;
+      break;
+    }
   }
 
   //Need's to be in the Loop as serialEvent won't be open, because their is no Data needed for saving
-  if(state == Speichern)
+  if(serialState == SPEICHERN)
   {
-    //To Do let the other's know they need so save 
-    eeprom.begin("LEDState",false);
-    myLight[0].saveState(&eeprom);
-    eeprom.end();
-    
-    state = Ende;
+    loopState = SAVE_LED;
+    serialState = ENDE;
   }
 }
