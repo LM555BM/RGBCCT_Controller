@@ -1,12 +1,13 @@
-#include <WiFi.h>
-#include <Preferences.h>
 #include "driver/touch_pad.h"
 #include "esp_now_connect.hpp"
 #include "led.hpp"
+#include <Preferences.h>
+#include <WiFi.h>
 
 //Enums
 //All States the Serial Inteface can be in
-enum {
+enum
+{
   START = 0xC9,
   DATENART,
   FRAMESIZE,
@@ -19,7 +20,8 @@ enum {
 };
 
 //All states for the main Loop
-enum {
+enum
+{
   IDLE,
   SAVE_LED,
   UPDATE_LED,
@@ -51,7 +53,7 @@ bool longPressDetected = false;
 bool shortPressDetected = false;
 uint16_t touchValue = 0;
 
-std::vector<LED> myLight;
+std::vector< LED > myLight;
 ESP_NOW_BASE* espNowConnection;
 static uint16_t serialState = START;
 uint8_t loopState = IDLE;
@@ -59,16 +61,19 @@ uint8_t loopState = IDLE;
 Preferences eeprom;
 
 //ISR
-void touch_pad_pressed_isr(void* arg) {
+void touch_pad_pressed_isr(void* arg)
+{
   touch_pad_read(firstPad, &touchValue);
 
-  static hw_timer_t* usedTimer = static_cast<hw_timer_t*>(arg);
+  static hw_timer_t* usedTimer = static_cast< hw_timer_t* >(arg);
   static uint32_t currentPad = 0xFFFF;
   uint32_t touchStatus = touch_pad_get_status();
   touch_pad_clear_status();
 
-  if (touchStatus & BIT8 & currentPad) {
-    if (currentPad == 0xFFFF) {
+  if (touchStatus & BIT8 & currentPad)
+  {
+    if (currentPad == 0xFFFF)
+    {
       currentPad = BIT8;
 
       timerRestart(usedTimer);
@@ -78,10 +83,12 @@ void touch_pad_pressed_isr(void* arg) {
       touch_pad_set_trigger_mode(TOUCH_TRIGGER_ABOVE);
     }
 
-    else {
+    else
+    {
       timerStop(usedTimer);
       timerAlarmDisable(usedTimer);
-      if (timerReadMilis(usedTimer) > 50 && timerReadMilis(usedTimer) < 3000) {
+      if (timerReadMilis(usedTimer) > 50 && timerReadMilis(usedTimer) < 3000)
+      {
         shortPressDetected = true;
       }
 
@@ -91,11 +98,13 @@ void touch_pad_pressed_isr(void* arg) {
   }
 }
 
-void longPress_isr(void) {
+void longPress_isr(void)
+{
   longPressDetected = true;
 }
 
-void serialEvent() {
+void serialEvent()
+{
   Serial.write(serialState & 0x00FF);
 
   static uint16_t length;
@@ -103,107 +112,143 @@ void serialEvent() {
   static uint8_t neededBytes = 1;
   uint8_t buffer[3];
 
-  while (Serial.available() >= neededBytes) {
-    switch (serialState & 0x00FF) {
+  while (Serial.available() >= neededBytes)
+  {
+    switch (serialState & 0x00FF)
+    {
       case START:
-        if (Serial.read() == START) {
-          serialState = DATENART;
+        {
+          if (Serial.read() == START)
+          {
+            serialState = DATENART;
+          }
+          break;
         }
-        break;
+
       case DATENART:
-        serialState = Serial.read() << 8 | FRAMESIZE;
-        neededBytes = 2;
-        break;
+        {
+          serialState = Serial.read() << 8 | FRAMESIZE;
+          neededBytes = 2;
+          break;
+        }
 
       case FRAMESIZE:
-        Serial.readBytes(buffer, neededBytes);
-        length = buffer[0] << 8 | buffer[1];
+        {
+          Serial.readBytes(buffer, neededBytes);
+          length = buffer[0] << 8 | buffer[1];
 
-        if (length / neededBytes > myLight.size()) {
-          myLight.reserve(length / neededBytes);
+          if (length / neededBytes > myLight.size())
+          {
+            myLight.reserve(length / neededBytes);
+          }
+
+
+          serialState = serialState >> 8;
+          if (serialState == DATENPAKET)
+          {
+            neededBytes = 3;
+          }
+          else if (serialState & 0xFF00 == KOMMANDOPAKET)
+          {
+            neededBytes = 1;
+          }
+          break;
         }
-
-
-        serialState = serialState >> 8;
-        if (serialState == DATENPAKET) {
-          neededBytes = 3;
-        } else if (serialState & 0xFF00 == KOMMANDOPAKET) {
-          neededBytes = 1;
-        }
-        break;
 
       case DATENPAKET:
-        Serial.readBytes(buffer, 3);
-        try {
-          myLight.at(artworkCounter++).setRGB(buffer);
-        } catch (std::out_of_range const& exc) {
-          myLight.push_back(LED(buffer[RED], buffer[GREEN], buffer[BLUE]));
-        }
+        {
+          Serial.readBytes(buffer, 3);
+          try
+          {
+            myLight.at(artworkCounter++).setRGB(buffer);
+          }
+          catch (std::out_of_range const& exc)
+          {
+            myLight.push_back(LED(buffer[RED], buffer[GREEN], buffer[BLUE]));
+          }
 
-        length = length - 3;
+          length = length - 3;
 
-        if (length == 0) {
-          neededBytes = 1;
-          serialState = ENDE;
+          if (length == 0)
+          {
+            neededBytes = 1;
+            serialState = ENDE;
+          }
+          break;
         }
-        break;
 
       case KOMMANDOPAKET:
-        serialState = Serial.read();
-        break;
+        {
+          serialState = Serial.read();
+          break;
+        }
+
 
       case HELLIGKEITSBEFEHL:
-        //There is currently only one Brightness for everybody
-        buffer[0] = Serial.read();
-        for (auto& artwork : myLight) {
-          artwork.setBrightness(buffer[0]);
-        }
+        {
+          //There is currently only one Brightness for everybody
+          buffer[0] = Serial.read();
+          for (auto& artwork : myLight)
+          {
+            artwork.setBrightness(buffer[0]);
+          }
 
-        // Use when seprate Brightnesses are available
-        //myLight[artworkCounter++].setBrightness(buffer[0]);
+          // Use when seprate Brightnesses are available
+          //myLight[artworkCounter++].setBrightness(buffer[0]);
 
-        if (--length == 0) {
-          neededBytes = 1;
-          serialState = ENDE;
+          if (--length == 0)
+          {
+            neededBytes = 1;
+            serialState = ENDE;
+          }
+          break;
         }
-        break;
 
       case TEMPRATURBEFEHL:
-        buffer[0] = Serial.read();
-        for (auto& artwork : myLight) {
-          artwork.setTemprature(buffer[0]);
+        {
+          buffer[0] = Serial.read();
+          for (auto& artwork : myLight)
+          {
+            artwork.setTemprature(buffer[0]);
+          }
+
+          // Use when seprate Tempratures are available
+          myLight[artworkCounter++].setTemprature(buffer[0]);
+
+          if (--length == 0)
+          {
+            neededBytes = 1;
+            serialState = ENDE;
+          }
+          break;
         }
 
-        // Use when seprate Tempratures are available
-        myLight[artworkCounter++].setTemprature(buffer[0]);
-
-        if (--length == 0) {
-          neededBytes = 1;
-          serialState = ENDE;
-        }
-        break;
 
       case ENDE:
-        if (Serial.read() == ENDE) {
-          artworkCounter = 0;
-          neededBytes = 1;
-          serialState = START;
-          loopState = UPDATE_LED;
+        {
+          if (Serial.read() == ENDE)
+          {
+            artworkCounter = 0;
+            neededBytes = 1;
+            serialState = START;
+            loopState = UPDATE_LED;
+          }
+          break;
         }
-        break;
     }
   }
 }
 
 //Functions
 //Seach for all connections that were made prior, but max 20 as ESP_NOW can only hold 20
-void reload_connections() {
+void reload_connections()
+{
   uint8_t connectionCount = 0;
   uint8_t peerAddr[6];
 
   eeprom.begin("MACAdresses", false);
 
-  while (eeprom.isKey(std::to_string(connectionCount).data()) && connectionCount < 20) 
+  while (eeprom.isKey(std::to_string(connectionCount).data()) && connectionCount < 20)
   {
     if (eeprom.getBytes(std::to_string(connectionCount++).data(), peerAddr, 6) > 0)
     {
@@ -215,7 +260,8 @@ void reload_connections() {
   eeprom.end();
 }
 
-void setup() {
+void setup()
+{
   //Miscellaneous stuff
   WiFi.mode(WIFI_STA);
 
@@ -227,9 +273,12 @@ void setup() {
   delay(1000);
 
   //The Pin serialDetect is connected to the USB Voltage and will thus be High if a Serial Connection to a PC is available
-  if (digitalRead(serialDetect)) {
+  if (digitalRead(serialDetect))
+  {
     espNowConnection = new ESP_NOW_MASTER(&loopState, &myLight);
-  } else {
+  }
+  else
+  {
     espNowConnection = new ESP_NOW_SLAVE(&loopState, &myLight);
   }
 
@@ -268,16 +317,19 @@ void setup() {
   touch_pad_set_fsm_mode(TOUCH_FSM_MODE_TIMER);
   touch_pad_config(firstPad, 200);
   touch_pad_set_trigger_mode(TOUCH_TRIGGER_BELOW);
-  touch_pad_isr_register(touch_pad_pressed_isr, static_cast<void*>(timer1));
+  touch_pad_isr_register(touch_pad_pressed_isr, static_cast< void* >(timer1));
   touch_pad_intr_enable();
 }
 
-void loop() {
-  switch (loopState) {
+void loop()
+{
+  switch (loopState)
+  {
     case IDLE:
       {
+        break;
       }
-      break;
+
 
     case POWER_SAVING:
       {
@@ -293,7 +345,7 @@ void loop() {
 
         eeprom.begin("LEDState", false);
 
-        std::array<uint8_t, 5>& saveColor = myLight[0].getColor();
+        std::array< uint8_t, 5 >& saveColor = myLight[0].getColor();
 
         error &= eeprom.putUChar("Red", saveColor[RED]);
         error &= eeprom.putUChar("Green", saveColor[GREEN]);
@@ -301,13 +353,15 @@ void loop() {
         error &= eeprom.putUChar("Brightness", saveColor[BRIGHTNESS]);
         error &= eeprom.putUChar("Temprature", saveColor[TEMPRATURE]);
 
-        if (eeprom.isKey("init") == 0) {
+        if (eeprom.isKey("init") == 0)
+        {
           eeprom.putBool("init", true);
         }
 
         eeprom.end();
 
-        if (error != 0) {
+        if (error != 0)
+        {
           Serial.println("An error has occured while saving to NVM");
         }
         //Inform others
@@ -320,7 +374,7 @@ void loop() {
     case UPDATE_LED:
       {
         Serial.println("Update LED State");
-        std::array<uint8_t, 5>& newColor = myLight[0].getColor();
+        std::array< uint8_t, 5 >& newColor = myLight[0].getColor();
 
         ledcWrite(RedLED, newColor[RED]);
         ledcWrite(GreenLED, newColor[GREEN]);
@@ -343,7 +397,8 @@ void loop() {
         esp_now_peer_info_t* newPeer = espNowConnection->autoPairing();
         digitalWrite(debugLED, LOW);
 
-        if (newPeer != nullptr) {
+        if (newPeer != nullptr)
+        {
           Serial.println("newPeer != nullptr");
           eeprom.begin("MACAdresses", false);
           if (eeprom.isKey("conCount") == 1 && connectionCount == 0)
@@ -356,25 +411,33 @@ void loop() {
         }
 
         loopState = IDLE;
+        break;
       }
   }
 
-  if (longPressDetected == true) {
+  if (longPressDetected == true)
+  {
     loopState = CONNECT;
     longPressDetected = false;
   }
 
   //The Pin serialDetect is connected to the USB Voltage and will thus be High if a Serial Connection to a PC is available
-  if (espNowConnection != nullptr) {
-    if (digitalRead(serialDetect)) {
-      if (espNowConnection->stateSelf == SLAVE) {
+  if (espNowConnection != nullptr)
+  {
+    if (digitalRead(serialDetect))
+    {
+      if (espNowConnection->stateSelf == SLAVE)
+      {
         Serial.println("Slave -> Master");
         delete espNowConnection;
         espNowConnection = new ESP_NOW_MASTER(&loopState, &myLight);
         reload_connections();
       }
-    } else {
-      if (espNowConnection->stateSelf == MASTER) {
+    }
+    else
+    {
+      if (espNowConnection->stateSelf == MASTER)
+      {
         Serial.println("Master -> Slave");
         delete espNowConnection;
         espNowConnection = new ESP_NOW_SLAVE(&loopState, &myLight);
@@ -384,7 +447,8 @@ void loop() {
   }
 
   //Need's to be in the Loop as serialEvent won't be opened, because their is no Data needed for saving
-  if (serialState == SPEICHERN) {
+  if (serialState == SPEICHERN)
+  {
     loopState = SAVE_LED;
     serialState = ENDE;
   }

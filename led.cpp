@@ -1,8 +1,8 @@
-#include <Preferences.h>
 #include "led.hpp"
+#include <Preferences.h>
 
 //Initalize with the Default State as an Orange
-LED::LED(uint8_t redPart, uint8_t greenPart, uint8_t bluePart, uint8_t temprature, uint8_t intensity) 
+LED::LED(uint8_t redPart, uint8_t greenPart, uint8_t bluePart, uint8_t temprature, uint8_t intensity)
 {
   color[RED] = redPart;
   color[GREEN] = greenPart;
@@ -11,12 +11,12 @@ LED::LED(uint8_t redPart, uint8_t greenPart, uint8_t bluePart, uint8_t tempratur
   color[BRIGHTNESS] = intensity;
 }
 
-void LED::setColor(std::array<uint8_t, 5>* colorData)
+void LED::setColor(std::array< uint8_t, 5 >* colorData)
 {
   color = *colorData;
 }
 
-bool LED::setRGB(uint8_t *RGB_LED)
+bool LED::setRGB(uint8_t* RGB_LED)
 {
   color[RED] = RGB_LED[0];
   color[GREEN] = RGB_LED[1];
@@ -47,7 +47,7 @@ bool LED::setBrightness(uint8_t intensity)
   return 0;
 }
 
-std::array<uint8_t, 5>& LED::getColor()
+std::array< uint8_t, 5 >& LED::getColor()
 {
   return color;
 }
