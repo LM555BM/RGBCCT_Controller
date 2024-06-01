@@ -22,8 +22,9 @@ void ESP_NOW_BASE::printMAC(const uint8_t * mac_addr)
   Serial.print(macStr);
 }
 
-bool ESP_NOW_BASE::addPeer(const uint8_t *peer_addr) 
+uint8_t ESP_NOW_BASE::addPeer(const uint8_t *peer_addr) 
 {      
+  Serial.println("addPair");
   esp_now_peer_info_t pairedDevice;
   memset(&pairedDevice, 0, sizeof(pairedDevice));
   memcpy(pairedDevice.peer_addr, peer_addr, 6);
@@ -34,7 +35,7 @@ bool ESP_NOW_BASE::addPeer(const uint8_t *peer_addr)
   // check if the peer exists
   if(esp_now_is_peer_exist(pairedDevice.peer_addr)) {
     Serial.println("Already Paired");
-    return true;
+    return 2;
   }
   else {
     esp_err_t addStatus = esp_now_add_peer(&pairedDevice);
@@ -47,20 +48,16 @@ bool ESP_NOW_BASE::addPeer(const uint8_t *peer_addr)
         printMAC(peer_addr);
         Serial.println(" : Added to connection Vector");
       }
-      return true;
+      return 1;
     }
     else 
     {
-      Serial.println("addPair failed:");
+      Serial.println("addPeer failed:");
       printMAC(peer_addr);
-      return false;
+      return 0;
     }
   }
 } 
-
-
-
-
 
 
 //Master declaration
@@ -117,33 +114,70 @@ void ESP_NOW_MASTER::OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomin
     break;
 
   case PAIRING:
-    pairing_t pairingData;
-
-    memcpy(&pairingData, incomingData, sizeof(pairingData));
-    
-    pairingData.senderType = MASTER;
-    Serial.println("send response");
-
-    addPeer(mac_addr);
-
-    esp_err_t result = esp_now_send(mac_addr, (uint8_t *) &pairingData, sizeof(pairingData));
-    if(result == ESP_OK)
+    //Only Respond if in Paring Mode
+    if(pairingStatus == PAIR_REQUESTED)
     {
-      Serial.println("Sent Pairing Respons");
+      pairing_t pairingData;
+
+      memcpy(&pairingData, incomingData, sizeof(pairingData));
+      
+      pairingData.senderType = MASTER;
+      Serial.println("send response");
+
+      uint8_t addStatus = addPeer(mac_addr);
+      if(addStatus)
+      {
+        esp_err_t result = esp_now_send(mac_addr, (uint8_t *) &pairingData, sizeof(pairingData));
+        if(result == ESP_OK)
+        {
+          Serial.println("Sent Pairing Respons");
+        }
+        else
+        {
+          Serial.println("Error while sending Pairing Respons");
+          esp_now_del_peer(mac_addr);
+        }
+
+        if(addStatus == 1)
+        {
+          pairingStatus = PAIR_PAIRED;
+        }
+        else if(addStatus == 2)
+        {
+          pairingStatus = ALREADY_PAIRED;
+        }
+      }
     }
-    else
-    {
-      //Maybe remove peer againg
-      Serial.println("Error while sending Pairing Respons");
-    } 
+    
     break; 
   }
 }
 
 //Make it usable
-uint8_t ESP_NOW_MASTER::autoPairing()
+esp_now_peer_info_t* ESP_NOW_MASTER::autoPairing()
 {
-  return PAIR_PAIRED;
+  //make sure that only the one master in autoPairing can connect
+  pairingStatus = PAIR_REQUESTED;
+  uint32_t currentMillis = millis();
+  uint32_t previousMillis = currentMillis;
+
+  //Wait for a Pairing Signal from a Slave for 30s
+  //Can be cancled early if a connection is established 
+  while(currentMillis - previousMillis <= 20000)
+  {
+    if(pairingStatus == PAIR_REQUESTED)
+    {
+      currentMillis = millis();
+    }
+    else
+    {
+      currentMillis = previousMillis + 30000;
+    }
+  }
+
+  esp_now_peer_info_t* returnValue = (pairingStatus == PAIR_PAIRED ? &connections.back() : nullptr);
+  pairingStatus = PAIR_REQUEST;
+  return returnValue;
 }
 
 
@@ -191,7 +225,7 @@ void ESP_NOW_SLAVE::OnDataRecv(const uint8_t * mac_addr, const uint8_t *incoming
 
   switch (type) 
   {
-  case LIGHTING_DATA:                           // the message is data type
+  case LIGHTING_DATA:
     sendingData_t<std::array<uint8_t, 5>> lightingData;
     memcpy(&lightingData, incomingData, sizeof(lightingData));
 
@@ -207,31 +241,38 @@ void ESP_NOW_SLAVE::OnDataRecv(const uint8_t * mac_addr, const uint8_t *incoming
     Serial.println("Save Lighting Conditon");
     break;
 
-  case PAIRING:                            // the message is a pairing request 
+  case PAIRING:
     pairing_t pairingData;
-
     memcpy(&pairingData, incomingData, sizeof(pairingData));
     
     //As all the AutoParing Requst are Broadcastet and will be heared by all slaves, check if Information came Peer to Peer from a Master
     if(pairingData.senderType == MASTER)
     {
       //If the Master Responded accept him as the Connection
-
-      if(addPeer(mac_addr))
+      uint8_t addStatus = addPeer(mac_addr);
+      if(addStatus == 1)
       {
         pairingStatus = PAIR_PAIRED;
+      }
+      else if(addStatus == 2)
+      {
+        pairingStatus = ALREADY_PAIRED;
       }
     }
     break; 
   }
 }
 
-uint8_t ESP_NOW_SLAVE::autoPairing()
+esp_now_peer_info_t* ESP_NOW_SLAVE::autoPairing()
 {
+  pairingStatus = PAIR_REQUEST;
   pairing_t pairingData;
   uint8_t tries = 0;
   uint32_t currentMillis = 0;
   uint32_t previousMillis = 0;
+
+  pairingData.msgType = PAIRING;
+  pairingData.senderType = SLAVE;
   
   while(tries < 6)
   {
@@ -241,7 +282,7 @@ uint8_t ESP_NOW_SLAVE::autoPairing()
         //Try again with a new ESP-NOW initialization
         esp_now_deinit();
 
-        if (esp_now_init() != 0) 
+        if(esp_now_init() != 0) 
         {
           Serial.println("Error initializing ESP-NOW");
           break;
@@ -252,9 +293,6 @@ uint8_t ESP_NOW_SLAVE::autoPairing()
 
         addPeer(broadcastAddressX);
       
-        // set pairing data to send to the server
-        pairingData.msgType = PAIRING;
-        pairingData.senderType = SLAVE;
         previousMillis = millis();
 
         //Make itself kown to any master Device out there
@@ -278,8 +316,13 @@ uint8_t ESP_NOW_SLAVE::autoPairing()
       case PAIR_PAIRED:
         tries = 6;
         break;
-    }   
+      
+      case ALREADY_PAIRED:
+        tries = 6;
+        break;
+    }  
   }
-
-  return pairingStatus;
+  
+  esp_now_peer_info_t* returnValue = (pairingStatus == PAIR_PAIRED ? &connections.back() : nullptr);
+  return returnValue;
 }

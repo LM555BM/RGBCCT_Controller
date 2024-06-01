@@ -4,19 +4,14 @@
 #include <esp_now.h>
 #include <vector>
 
-enum pairingStatus_t{PAIR_REQUEST, PAIR_REQUESTED, PAIR_PAIRED};
+//Gloable Typedefs
+enum pairingStatus_t{PAIR_REQUEST, PAIR_REQUESTED, PAIR_PAIRED, ALREADY_PAIRED};
 enum messageType_t{LIGHTING_DATA, SAVE, PAIRING};
+enum stateSelf_t{MASTER, SLAVE};
 
 class ESP_NOW_BASE
 {
 	public:
-		//Typedefs
-		enum stateSelf_t{
-		  MASTER,
-		  SLAVE,
-		  UNKNOWN
-		};
-
 		struct pairing_t{
 		  messageType_t msgType;
 		  stateSelf_t senderType;
@@ -34,11 +29,11 @@ class ESP_NOW_BASE
 		//Methodes
     ESP_NOW_BASE(uint8_t* loopState, std::vector<LED>* ledVector);
     ~ESP_NOW_BASE();
-		virtual uint8_t autoPairing() = 0;
+		virtual esp_now_peer_info_t* autoPairing() = 0;
+    uint8_t addPeer(const uint8_t *peer_addr); 
 
-
-    template <typename T>
-    esp_err_t sendLightingData(std::vector<T>* data,  messageType_t messageType)
+    template <typename T = char>
+    esp_err_t sendLightingData(messageType_t messageType, std::vector<T>* data = nullptr)
     {
       esp_err_t errorMsg;
 
@@ -79,7 +74,6 @@ class ESP_NOW_BASE
 		const uint8_t broadcastAddressX[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 		
 		//Methodes
-		bool addPeer(const uint8_t *peer_addr); 
 		void printMAC(const uint8_t * mac_addr);
 		
 		virtual void  OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) = 0;
@@ -92,7 +86,7 @@ class ESP_NOW_MASTER : public ESP_NOW_BASE
 {
 	public:
     ESP_NOW_MASTER(uint8_t* loopState, std::vector<LED>* ledVector);
-    uint8_t autoPairing() override;
+    esp_now_peer_info_t* autoPairing() override;
 
   protected:
     static ESP_NOW_MASTER* ptr;
@@ -107,7 +101,7 @@ class ESP_NOW_SLAVE : public ESP_NOW_BASE
 {
   public:
     ESP_NOW_SLAVE(uint8_t* loopState, std::vector<LED>* ledVector);
-    uint8_t autoPairing() override;  
+    esp_now_peer_info_t* autoPairing() override;  
 
   protected:
     static ESP_NOW_SLAVE* ptr;
