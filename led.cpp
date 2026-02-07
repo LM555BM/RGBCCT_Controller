@@ -11,7 +11,7 @@ LED::LED(uint8_t redPart, uint8_t greenPart, uint8_t bluePart, uint8_t tempratur
   color[BRIGHTNESS] = intensity;
 }
 
-void LED::setColor(std::array< uint8_t, 5 >* colorData)
+void LED::setColor(std::array<uint8_t, 5>* colorData)
 {
   color = *colorData;
 }

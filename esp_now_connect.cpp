@@ -62,6 +62,19 @@ uint8_t ESP_NOW_BASE::addPeer(const uint8_t* peer_addr)
   }
 }
 
+void ESP_NOW_BASE::changePowerStateAll(uint8_t* newPowerState)
+{
+  sendingData_t< uint8_t > powerStateDataSend;
+
+  powerStateDataSend.msgType = CHANGE_POWER_STATE;
+  powerStateDataSend.data = *newPowerState;
+
+  for(uint8_t connectionCounter=0; connectionCounter < connections.size(); connectionCounter++)
+  {
+    esp_now_send(connections[connectionCounter].peer_addr, (uint8_t*)&powerStateDataSend, sizeof(powerStateDataSend));
+  }
+}
+
 
 //Master declaration
 ESP_NOW_MASTER* ESP_NOW_MASTER::ptr = nullptr;
@@ -109,7 +122,7 @@ void ESP_NOW_MASTER::OnDataRecv(const uint8_t* mac_addr, const uint8_t* incoming
   {
     case LIGHTING_DATA:
       {
-        sendingData_t< std::array< uint8_t, 5 > > lightingData;
+        sendingData_t< std::array< uint8_t, 5> > lightingData;
         memcpy(&lightingData, incomingData, sizeof(lightingData));
 
         for (const auto& ledValue : lightingData.data)
@@ -118,12 +131,16 @@ void ESP_NOW_MASTER::OnDataRecv(const uint8_t* mac_addr, const uint8_t* incoming
           Serial.print(" ");
         }
         Serial.println();
+
+        lights->at(0).setColor(&lightingData.data);
+        *main_state = UPDATE_LED; 
         break;
       }
 
     case SAVE:
       {
-        Serial.println("Save Lighting Conditon");
+        Serial.println("Save Lighting Conditon as Master");
+        *main_state = SAVE_LED;
         break;
       }
 
@@ -166,6 +183,27 @@ void ESP_NOW_MASTER::OnDataRecv(const uint8_t* mac_addr, const uint8_t* incoming
 
         break;
       }
+
+    case CHANGE_POWER_STATE:
+      {
+        sendingData_t< uint8_t > powerStateData;
+        memcpy(&powerStateData, incomingData, sizeof(powerStateData));
+
+        switch(powerStateData.data)
+          {
+            case OFF:
+            {
+              *main_state = SHUTDOWN_LED; 
+              break;
+            }
+            case ON:
+            {
+              *main_state = AWAKE_LED; 
+              break;
+            }
+          }
+        break;
+      }
   }
 }
 
@@ -196,8 +234,38 @@ esp_now_peer_info_t* ESP_NOW_MASTER::autoPairing()
   return returnValue;
 }
 
+void ESP_NOW_MASTER::saveAll()
+{
+  sendingData_t< uint8_t> saveDataSend;
+  saveDataSend.msgType = SAVE;
 
+  for(uint8_t artworkCounter = 1, connectionCounter = 0; artworkCounter < lights->size() && connectionCounter < connections.size(); artworkCounter++, connectionCounter++)
+  {
+    Serial.print("Sending Artwork ");
+    Serial.print(artworkCounter+1);
+    Serial.print(" of ");
+    Serial.println(lights->size());
 
+    Serial.print("Using connection ");
+    Serial.print(connectionCounter+1);
+    Serial.print(" of ");
+    Serial.println(connections.size());
+
+    esp_now_send(connections[connectionCounter].peer_addr, (uint8_t*)&saveDataSend, sizeof(saveDataSend));
+  }
+}
+
+void ESP_NOW_MASTER::updateLedAll()
+{
+  sendingData_t< std::array< uint8_t, 5 > > lightingDataSend;
+  lightingDataSend.msgType = LIGHTING_DATA;
+
+  for(uint8_t artworkCounter = 1, connectionCounter = 0; artworkCounter < lights->size() && connectionCounter < connections.size(); artworkCounter++, connectionCounter++)
+  {
+    lightingDataSend.data = lights->at(artworkCounter).getColor();
+    esp_now_send(connections[connectionCounter].peer_addr, (uint8_t*)&lightingDataSend, sizeof(lightingDataSend));
+  }
+}
 
 
 //Slave declaration
@@ -249,7 +317,7 @@ void ESP_NOW_SLAVE::OnDataRecv(const uint8_t* mac_addr, const uint8_t* incomingD
   {
     case LIGHTING_DATA:
       {
-        sendingData_t< std::array< uint8_t, 5 > > lightingData;
+        sendingData_t< std::array< uint8_t, 5> > lightingData;
         memcpy(&lightingData, incomingData, sizeof(lightingData));
 
         for (const auto& ledValue : lightingData.data)
@@ -258,12 +326,16 @@ void ESP_NOW_SLAVE::OnDataRecv(const uint8_t* mac_addr, const uint8_t* incomingD
           Serial.print(" ");
         }
         Serial.println();
+
+        lights->at(0).setColor(&lightingData.data);
+        *main_state = UPDATE_LED; 
         break;
       }
 
     case SAVE:
       {
-        Serial.println("Save Lighting Conditon");
+        Serial.println("Save Lighting Conditon as Slave");
+        *main_state = SAVE_LED;
         break;
       }
 
@@ -287,6 +359,26 @@ void ESP_NOW_SLAVE::OnDataRecv(const uint8_t* mac_addr, const uint8_t* incomingD
           }
         }
         break;
+      }
+
+    case CHANGE_POWER_STATE:
+      {
+        sendingData_t< uint8_t > powerStateData;
+        memcpy(&powerStateData, incomingData, sizeof(powerStateData));
+
+        switch(powerStateData.data)
+          {
+            case OFF:
+              {
+                *main_state = SHUTDOWN_LED; 
+                break;
+              }
+            case ON:
+              {
+                *main_state = AWAKE_LED; 
+                break;
+              }
+          }
       }
   }
 }

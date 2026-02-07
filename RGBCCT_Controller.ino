@@ -19,23 +19,13 @@ enum
   ENDE = 0x36
 };
 
-//All states for the main Loop
-enum
-{
-  IDLE,
-  SAVE_LED,
-  UPDATE_LED,
-  POWER_SAVING,
-  CONNECT
-};
-
 //IO-Pinout Config
 const uint8_t RedPin = 19;
 const uint8_t GreenPin = 18;
 const uint8_t BluePin = 5;
 const uint8_t WarmPin = 15;
 const uint8_t ColdPin = 4;
-const uint8_t serialDetect = 34;
+const uint8_t serialDetect = 36;
 
 const uint8_t RedLED = 0;
 const uint8_t GreenLED = 1;
@@ -51,20 +41,18 @@ const touch_pad_t secondPad = TOUCH_PAD_NUM9;
 //Gloable Variable and Instances
 bool longPressDetected = false;
 bool shortPressDetected = false;
-uint16_t touchValue = 0;
 
 std::vector< LED > myLight;
 ESP_NOW_BASE* espNowConnection;
 static uint16_t serialState = START;
 uint8_t loopState = IDLE;
+uint8_t powerState = ON;
 
 Preferences eeprom;
 
 //ISR
 void touch_pad_pressed_isr(void* arg)
 {
-  touch_pad_read(firstPad, &touchValue);
-
   static hw_timer_t* usedTimer = static_cast< hw_timer_t* >(arg);
   static uint32_t currentPad = 0xFFFF;
   uint32_t touchStatus = touch_pad_get_status();
@@ -87,8 +75,11 @@ void touch_pad_pressed_isr(void* arg)
     {
       timerStop(usedTimer);
       timerAlarmDisable(usedTimer);
+
+      //Register a short press
       if (timerReadMilis(usedTimer) > 50 && timerReadMilis(usedTimer) < 3000)
       {
+        loopState = powerState == ON ? SHUTDOWN_LED : AWAKE_LED;
         shortPressDetected = true;
       }
 
@@ -105,7 +96,7 @@ void longPress_isr(void)
 
 void serialEvent()
 {
-  Serial.write(serialState & 0x00FF);
+  //Serial.write(serialState & 0x00FF);
 
   static uint16_t length;
   static uint8_t artworkCounter = 0;
@@ -260,17 +251,37 @@ void reload_connections()
   eeprom.end();
 }
 
+//Update the LED lights based on the current saved color
+void updateLEDC()
+{
+  std::array< uint8_t, 5 >& newColor = myLight[0].getColor();
+
+  ledcWrite(RedLED, newColor[RED]);
+  ledcWrite(GreenLED, newColor[GREEN]);
+  ledcWrite(BlueLED, newColor[BLUE]);
+  ledcWrite(WarmLED, (newColor[TEMPRATURE] * newColor[BRIGHTNESS]) / 255);
+  ledcWrite(ColdLED, (((255 - newColor[TEMPRATURE]) * newColor[BRIGHTNESS]) / 255));
+
+  Serial.println(newColor[RED]);
+  Serial.println(newColor[GREEN]);
+  Serial.println(newColor[BLUE]);
+  Serial.println(newColor[TEMPRATURE]);
+  Serial.println(newColor[BRIGHTNESS]);
+}
+
 void setup()
 {
   //Miscellaneous stuff
   WiFi.mode(WIFI_STA);
 
   pinMode(debugLED, OUTPUT);
-  pinMode(serialDetect, INPUT);
+  // INPUT_PULLDOWN does not work on the Pin serialDetect
+  pinMode(serialDetect, INPUT );
 
   Serial.begin(9600);
   while (!Serial) {}
-  delay(1000);
+  //Only needed if inrush current limit circuit is used
+  //delay(1000);
 
   //The Pin serialDetect is connected to the USB Voltage and will thus be High if a Serial Connection to a PC is available
   if (digitalRead(serialDetect))
@@ -289,7 +300,38 @@ void setup()
   //Restore the State of the LED's if available in the EEPROM, else create default
   eeprom.begin("LEDState", true);
   bool isInit = eeprom.isKey("init");
-  myLight.push_back(isInit ? LED(eeprom.getUChar("Red"), eeprom.getUChar("Green"), eeprom.getUChar("Blue"), eeprom.getUChar("Brightness"), eeprom.getUChar("Temprature")) : LED());
+  Serial.print("LEDState isInit = ");
+  Serial.println(isInit);
+  Serial.print("myLight length = ");
+  Serial.println(myLight.size());
+  
+  uint8_t r =eeprom.getUChar("Red");
+  uint8_t g =eeprom.getUChar("Green");
+  uint8_t b =eeprom.getUChar("Blue");
+  uint8_t t =eeprom.getUChar("Temprature");
+  uint8_t br =eeprom.getUChar("Brightness");
+  myLight.push_back(isInit ? LED(eeprom.getUChar("Red"), eeprom.getUChar("Green"), eeprom.getUChar("Blue"), eeprom.getUChar("Temprature"), eeprom.getUChar("Brightness")) : LED());
+  //myLight.push_back(isInit ? LED(r, g, b, t, br) : LED());
+
+  Serial.print("myLight length = ");
+  Serial.println(myLight.size());
+  Serial.println("MyLight[0]:");
+  for(auto vec : myLight)
+    for(auto test:vec.getColor())
+    {
+        Serial.println(test);
+    }
+
+
+  Serial.println("Color found in EEPROM:");
+  Serial.println(r);
+  Serial.println(g);
+  Serial.println(b);
+  Serial.println(t);
+  Serial.println(br);
+
+
+
   eeprom.end();
   loopState = UPDATE_LED;
 
@@ -316,6 +358,7 @@ void setup()
   esp_sleep_enable_touchpad_wakeup();
   touch_pad_set_fsm_mode(TOUCH_FSM_MODE_TIMER);
   touch_pad_config(firstPad, 200);
+  touch_pad_config(secondPad, 200);
   touch_pad_set_trigger_mode(TOUCH_TRIGGER_BELOW);
   touch_pad_isr_register(touch_pad_pressed_isr, static_cast< void* >(timer1));
   touch_pad_intr_enable();
@@ -330,9 +373,37 @@ void loop()
         break;
       }
 
-
-    case POWER_SAVING:
+    case AWAKE_LED:
       {
+        updateLEDC();
+        powerState = ON;
+
+        if(espNowConnection->stateSelf == MASTER || (espNowConnection->stateSelf == SLAVE && shortPressDetected))
+        {
+          shortPressDetected = false;
+          espNowConnection->changePowerStateAll(&powerState);
+        }
+
+        loopState = IDLE;
+        break;
+      } 
+
+    case SHUTDOWN_LED:
+      {
+        ledcWrite(RedLED, 0x00);
+        ledcWrite(GreenLED, 0x00);
+        ledcWrite(BlueLED, 0x00);
+        ledcWrite(WarmLED, 0x00);
+        ledcWrite(ColdLED, 0x00);
+        powerState = OFF;
+
+        if(espNowConnection->stateSelf == MASTER || (espNowConnection->stateSelf == SLAVE && shortPressDetected))
+        {
+          shortPressDetected = false;
+          espNowConnection->changePowerStateAll(&powerState);
+        }
+
+        loopState = IDLE;
         break;
       }
 
@@ -340,9 +411,8 @@ void loop()
     case SAVE_LED:
       {
         Serial.println("Save LED State");
-        //Create Keys if not init
+        //Create Keys if not initalized
         uint8_t error = 1;
-
         eeprom.begin("LEDState", false);
 
         std::array< uint8_t, 5 >& saveColor = myLight[0].getColor();
@@ -360,11 +430,19 @@ void loop()
 
         eeprom.end();
 
-        if (error != 0)
+        if (error == 0)
         {
           Serial.println("An error has occured while saving to NVM");
         }
-        //Inform others
+
+        Serial.print("Save Error = ");
+        Serial.println(error);
+
+        //Inform others if it's a MASTER at the moment
+        if(espNowConnection->stateSelf == MASTER)
+        {
+          static_cast<ESP_NOW_MASTER*>(espNowConnection)->saveAll();
+        }
 
         loopState = IDLE;
         break;
@@ -374,15 +452,13 @@ void loop()
     case UPDATE_LED:
       {
         Serial.println("Update LED State");
-        std::array< uint8_t, 5 >& newColor = myLight[0].getColor();
+        updateLEDC();
 
-        ledcWrite(RedLED, newColor[RED]);
-        ledcWrite(GreenLED, newColor[GREEN]);
-        ledcWrite(BlueLED, newColor[BLUE]);
-        ledcWrite(WarmLED, (newColor[TEMPRATURE] * newColor[BRIGHTNESS]) / 255);
-        ledcWrite(ColdLED, ((255 - newColor[TEMPRATURE] * newColor[BRIGHTNESS]) / 255));
-
-        //Inform others
+        //Inform others if it's a MASTER at the moment
+        if(espNowConnection->stateSelf == MASTER)
+        {
+          static_cast<ESP_NOW_MASTER*>(espNowConnection)->updateLedAll();
+        }
 
         loopState = IDLE;
         break;

@@ -21,7 +21,7 @@ private:
   std::array< uint8_t, 5 > color;
 
 public:
-  LED(uint8_t redPart = 0xFF, uint8_t greenPart = 0x64, uint8_t bluePart = 0x00, uint8_t temprature = 0x00, uint8_t intensity = 0x00);
+  LED(uint8_t redPart = 0xFF, uint8_t greenPart = 0x30, uint8_t bluePart = 0x00, uint8_t temprature = 0x00, uint8_t intensity = 0x00);
 
   /*
     RGB = [red,green,blue]

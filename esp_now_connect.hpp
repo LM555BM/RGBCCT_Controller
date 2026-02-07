@@ -16,12 +16,30 @@ enum messageType_t
 {
   LIGHTING_DATA,
   SAVE,
-  PAIRING
+  PAIRING,
+  CHANGE_POWER_STATE,
 };
 enum stateSelf_t
 {
   MASTER,
   SLAVE
+};
+
+enum powerState_t
+{
+  OFF,
+  ON
+};
+
+//Loop states for the main Loop in RGBCCT_Controller.ino
+enum
+{
+  IDLE,
+  SAVE_LED,
+  UPDATE_LED,
+  AWAKE_LED,
+  SHUTDOWN_LED,
+  CONNECT
 };
 
 class ESP_NOW_BASE
@@ -48,6 +66,8 @@ public:
   ~ESP_NOW_BASE();
   virtual esp_now_peer_info_t* autoPairing() = 0;
   uint8_t addPeer(const uint8_t* peer_addr);
+  void changePowerStateAll(uint8_t* newPowerState);
+
 
   template< typename T = char >
   esp_err_t sendLightingData(messageType_t messageType, std::vector< T >* data = nullptr)
@@ -84,7 +104,6 @@ protected:
   std::vector< LED >* lights;
   uint8_t* main_state;
 
-
   std::vector< esp_now_peer_info_t > connections;
   uint8_t pairingStatus = PAIR_REQUEST;
 
@@ -104,6 +123,8 @@ class ESP_NOW_MASTER : public ESP_NOW_BASE
 public:
   ESP_NOW_MASTER(uint8_t* loopState, std::vector< LED >* ledVector);
   esp_now_peer_info_t* autoPairing() override;
+  void saveAll();
+  void updateLedAll();
 
 protected:
   static ESP_NOW_MASTER* ptr;
